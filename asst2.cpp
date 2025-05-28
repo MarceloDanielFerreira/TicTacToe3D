@@ -2,7 +2,12 @@
 #include <GL/freeglut.h>
 #include <iostream>
 #include <vector>
+#include <tuple>
+
 #include <cmath>
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846 // Definir M_PI si no está definido
@@ -17,11 +22,21 @@ int board[BOARD_SIZE][BOARD_SIZE][BOARD_SIZE] = { 0 }; // 0=vacío, 1=jugador1, 
 int currentPlayer = 1;
 bool gameOver = false;
 int winner = 0;
+bool isDraw = false;  // Nueva variable para detectar empates
 
 // Variables de cámara
 float cameraAngleX = 45.0f;
 float cameraAngleY = 45.0f;
 float cameraDistance = 15.0f;
+
+// Variables de audio
+bool soundEnabled = true;
+bool musicEnabled = true;
+
+// Variables de animación
+float winningAnimationTime = 0.0f;
+bool isAnimating = false;
+std::vector<std::tuple<int, int, int>> winningPositions;
 
 // Prototipos de funciones
 void init();
@@ -37,6 +52,10 @@ bool checkWin();
 void highlightWinningLine();
 void drawText(const char* text, float x, float y);
 void createSimpleTextures();
+void playSound(const char* soundFile);
+void updateAnimation(int value);
+void drawWinningAnimation();
+bool checkDraw();
 
 // Texturas simples generadas proceduralmente
 GLuint cubeTexture, sphereTexturePlayer1, sphereTexturePlayer2;
@@ -55,6 +74,7 @@ int main(int argc, char** argv) {
     glutMouseFunc(mouse);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(specialKeyboard);
+    glutTimerFunc(0, updateAnimation, 0);
 
     glutMainLoop();
     return 0;
@@ -65,12 +85,18 @@ void init() {
     glEnable(GL_LIGHTING);
     glEnable(GL_LIGHT0);
     glEnable(GL_COLOR_MATERIAL);
+    glEnable(GL_TEXTURE_2D);
 
     // Configuración básica de luz
     GLfloat lightPos[4] = { 10.0f, 10.0f, 10.0f, 1.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
 
     glClearColor(0.2f, 0.3f, 0.4f, 1.0f);
+
+    // Iniciar música de fondo
+    if (musicEnabled) {
+        PlaySound(TEXT("background.wav"), NULL, SND_FILENAME | SND_ASYNC | SND_LOOP);
+    }
 }
 
 void createSimpleTextures() {
@@ -158,7 +184,7 @@ void display() {
     glColor3f(1.0f, 1.0f, 1.0f);
     char playerText[50];
     if (gameOver) {
-        if (winner == 0) {
+        if (isDraw) {
             sprintf(playerText, "Empate!");
         }
         else {
@@ -170,11 +196,22 @@ void display() {
     }
     drawText(playerText, 10, 580);
 
+    // Agregar instrucciones
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText("Controles:", 10, 550);
+    drawText("Click: Seleccionar", 10, 530);
+    drawText("Flechas: Rotar camara", 10, 510);
+    drawText("PgUp/PgDn: Zoom", 10, 490);
+    drawText("R: Reiniciar", 10, 470);
+    drawText("Q: Salir", 10, 450);
+
     glEnable(GL_LIGHTING);
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
     glPopMatrix();
+
+    drawWinningAnimation();
 
     glutSwapBuffers();
 }
@@ -219,15 +256,23 @@ void mouse(int button, int state, int x, int y) {
             board[selectedX][selectedY][selectedZ] == 0) {
 
             board[selectedX][selectedY][selectedZ] = currentPlayer;
+            playSound("click.wav");
 
-            // Verificar si hay un ganador
             if (checkWin()) {
                 gameOver = true;
                 winner = currentPlayer;
+                isAnimating = true;
+                winningAnimationTime = 0.0f;
+                playSound("win.wav");
+            }
+            else if (checkDraw()) {
+                gameOver = true;
+                isDraw = true;
+                playSound("draw.wav");
             }
             else {
-                // Cambiar de jugador
                 currentPlayer = (currentPlayer == 1) ? 2 : 1;
+                playSound("turn.wav");
             }
         }
 
@@ -260,51 +305,55 @@ void keyboard(unsigned char key, int x, int y) {
 }
 
 void specialKeyboard(int key, int x, int y) {
+    const float ROTATION_SPEED = 5.0f;
+    const float ZOOM_SPEED = 0.5f;
+    
     switch (key) {
-    case GLUT_KEY_UP:
-        cameraAngleX += 5.0f;
-        break;
-    case GLUT_KEY_DOWN:
-        cameraAngleX -= 5.0f;
-        break;
-    case GLUT_KEY_LEFT:
-        cameraAngleY += 5.0f;
-        break;
-    case GLUT_KEY_RIGHT:
-        cameraAngleY -= 5.0f;
-        break;
-    case GLUT_KEY_PAGE_UP:
-        cameraDistance -= 1.0f;
-        break;
-    case GLUT_KEY_PAGE_DOWN:
-        cameraDistance += 1.0f;
-        break;
+        case GLUT_KEY_LEFT:
+            cameraAngleY -= ROTATION_SPEED;
+            break;
+        case GLUT_KEY_RIGHT:
+            cameraAngleY += ROTATION_SPEED;
+            break;
+        case GLUT_KEY_UP:
+            cameraAngleX += ROTATION_SPEED;
+            break;
+        case GLUT_KEY_DOWN:
+            cameraAngleX -= ROTATION_SPEED;
+            break;
+        case GLUT_KEY_PAGE_UP:
+            cameraDistance -= ZOOM_SPEED;
+            if (cameraDistance < 5.0f) cameraDistance = 5.0f;
+            break;
+        case GLUT_KEY_PAGE_DOWN:
+            cameraDistance += ZOOM_SPEED;
+            if (cameraDistance > 30.0f) cameraDistance = 30.0f;
+            break;
     }
+    
+    // Limitar ángulos de cámara
+    if (cameraAngleX > 89.0f) cameraAngleX = 89.0f;
+    if (cameraAngleX < -89.0f) cameraAngleX = -89.0f;
+    
     glutPostRedisplay();
 }
 
 void drawBoard() {
-    for (int x = 0; x < BOARD_SIZE; x++) {
-        for (int y = 0; y < BOARD_SIZE; y++) {
-            for (int z = 0; z < BOARD_SIZE; z++) {
-                // Dibujar cubos en los ejes principales
-                if (x == 1 || y == 1 || z == 1) {
-                    drawCube(
-                        x * SPACING - SPACING,
-                        y * SPACING - SPACING,
-                        z * SPACING - SPACING,
-                        (x == 1 && y == 1 && z == 1) // Cubo central
-                    );
-                }
-
-                // Dibujar esferas para las jugadas
-                if (board[x][y][z] != 0) {
-                    drawSphere(
-                        x * SPACING - SPACING,
-                        y * SPACING - SPACING,
-                        z * SPACING - SPACING,
-                        board[x][y][z]
-                    );
+    // Dibujar ejes principales (cubos)
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            for (int k = 0; k < BOARD_SIZE; k++) {
+                float x = i * SPACING - SPACING;
+                float y = j * SPACING - SPACING;
+                float z = k * SPACING - SPACING;
+                
+                // Determinar si es un eje principal
+                bool isAxis = (i == 1 && j == 1) || (i == 1 && k == 1) || (j == 1 && k == 1);
+                
+                if (board[i][j][k] == 0) {
+                    drawCube(x, y, z, isAxis);
+                } else {
+                    drawSphere(x, y, z, board[i][j][k]);
                 }
             }
         }
@@ -316,25 +365,59 @@ void drawBoard() {
     }
 }
 
-void drawCube(float x, float y, float z, bool isCentral) {
+void drawCube(float x, float y, float z, bool isAxis) {
     glPushMatrix();
     glTranslatef(x, y, z);
-
-    if (isCentral) {
-        // Cubo central (amarillo oscuro)
-        glColor3f(0.8f, 0.7f, 0.1f);
-    }
-    else {
-        // Cubos de los ejes (amarillo más claro)
-        glColor3f(0.9f, 0.8f, 0.3f);
-    }
-
+    
     // Aplicar textura
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, cubeTexture);
+    if (isAxis) {
+        glBindTexture(GL_TEXTURE_2D, cubeTexture);
+        glColor3f(0.8f, 0.6f, 0.2f); // Color amarillo oscuro para ejes
+    } else {
+        glBindTexture(GL_TEXTURE_2D, cubeTexture);
+        glColor3f(0.7f, 0.7f, 0.7f); // Color gris para cubos normales
+    }
 
-    glutSolidCube(0.8f);
-
+    // Dibujar cubo con coordenadas de textura
+    glBegin(GL_QUADS);
+    // Frente
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    
+    // Atrás
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    
+    // Arriba
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    
+    // Abajo
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    
+    // Derecha
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    
+    // Izquierda
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glEnd();
+    
     glDisable(GL_TEXTURE_2D);
     glPopMatrix();
 }
@@ -342,25 +425,31 @@ void drawCube(float x, float y, float z, bool isCentral) {
 void drawSphere(float x, float y, float z, int player) {
     glPushMatrix();
     glTranslatef(x, y, z);
-
-    if (player == 1) {
-        glColor3f(1.0f, 0.0f, 0.0f); // Rojo para jugador 1
-        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer1);
-    }
-    else {
-        glColor3f(0.0f, 0.0f, 1.0f); // Azul para jugador 2
-        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer2);
-    }
-
+    
+    // Aplicar textura
     glEnable(GL_TEXTURE_2D);
-    glutSolidSphere(0.5f, 20, 20);
-    glDisable(GL_TEXTURE_2D);
+    if (player == 1) {
+        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer1);
+        glColor3f(1.0f, 0.3f, 0.3f); // Rojo para jugador 1
+    } else {
+        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer2);
+        glColor3f(0.3f, 0.3f, 1.0f); // Azul para jugador 2
+    }
 
+    // Crear esfera con coordenadas de textura
+    GLUquadricObj* quadric = gluNewQuadric();
+    gluQuadricTexture(quadric, GL_TRUE);
+    gluQuadricNormals(quadric, GLU_SMOOTH);
+    gluSphere(quadric, 0.4f, 32, 32);
+    gluDeleteQuadric(quadric);
+    
+    glDisable(GL_TEXTURE_2D);
     glPopMatrix();
 }
 
 bool checkWin() {
     // Verificar todas las posibles líneas ganadoras en 3D
+    winningPositions.clear();  // Limpiar posiciones ganadoras anteriores
 
     // Verificar líneas en el eje X
     for (int y = 0; y < BOARD_SIZE; y++) {
@@ -368,6 +457,10 @@ bool checkWin() {
             if (board[0][y][z] != 0 &&
                 board[0][y][z] == board[1][y][z] &&
                 board[1][y][z] == board[2][y][z]) {
+                // Guardar la línea ganadora
+                for (int x = 0; x < BOARD_SIZE; x++) {
+                    winningPositions.push_back(std::make_tuple(x, y, z));
+                }
                 return true;
             }
         }
@@ -379,6 +472,10 @@ bool checkWin() {
             if (board[x][0][z] != 0 &&
                 board[x][0][z] == board[x][1][z] &&
                 board[x][1][z] == board[x][2][z]) {
+                // Guardar la línea ganadora
+                for (int y = 0; y < BOARD_SIZE; y++) {
+                    winningPositions.push_back(std::make_tuple(x, y, z));
+                }
                 return true;
             }
         }
@@ -390,6 +487,10 @@ bool checkWin() {
             if (board[x][y][0] != 0 &&
                 board[x][y][0] == board[x][y][1] &&
                 board[x][y][1] == board[x][y][2]) {
+                // Guardar la línea ganadora
+                for (int z = 0; z < BOARD_SIZE; z++) {
+                    winningPositions.push_back(std::make_tuple(x, y, z));
+                }
                 return true;
             }
         }
@@ -400,11 +501,20 @@ bool checkWin() {
         if (board[0][0][z] != 0 &&
             board[0][0][z] == board[1][1][z] &&
             board[1][1][z] == board[2][2][z]) {
+            // Guardar la línea ganadora
+            for (int x = 0; x < BOARD_SIZE; x++) {
+                winningPositions.push_back(std::make_tuple(x, x, z));
+            }
             return true;
         }
         if (board[2][0][z] != 0 &&
             board[2][0][z] == board[1][1][z] &&
             board[1][1][z] == board[0][2][z]) {
+            // Guardar la línea ganadora
+            for (int x = 0; x < BOARD_SIZE; x++) {
+                winningPositions.push_back(std::make_tuple(x, BOARD_SIZE - 1 - x, z));
+                #include <tuple> // Agregar esta línea al inicio del archivo para incluir std::make_tuple
+            }
             return true;
         }
     }
@@ -414,11 +524,19 @@ bool checkWin() {
         if (board[0][y][0] != 0 &&
             board[0][y][0] == board[1][y][1] &&
             board[1][y][1] == board[2][y][2]) {
+            // Guardar la línea ganadora
+            for (int x = 0; x < BOARD_SIZE; x++) {
+                winningPositions.push_back(std::make_tuple(x, y, x));
+            }
             return true;
         }
         if (board[2][y][0] != 0 &&
             board[2][y][0] == board[1][y][1] &&
             board[1][y][1] == board[0][y][2]) {
+            // Guardar la línea ganadora
+            for (int x = 0; x < BOARD_SIZE; x++) {
+                winningPositions.push_back(std::make_tuple(x, y, BOARD_SIZE - 1 - x));
+            }
             return true;
         }
     }
@@ -428,11 +546,19 @@ bool checkWin() {
         if (board[x][0][0] != 0 &&
             board[x][0][0] == board[x][1][1] &&
             board[x][1][1] == board[x][2][2]) {
+            // Guardar la línea ganadora
+            for (int y = 0; y < BOARD_SIZE; y++) {
+                winningPositions.push_back(std::make_tuple(x, y, y));
+            }
             return true;
         }
         if (board[x][2][0] != 0 &&
             board[x][2][0] == board[x][1][1] &&
             board[x][1][1] == board[x][0][2]) {
+            // Guardar la línea ganadora
+            for (int y = 0; y < BOARD_SIZE; y++) {
+                winningPositions.push_back(std::make_tuple(x, BOARD_SIZE - 1 - y, y));
+            }
             return true;
         }
     }
@@ -441,25 +567,50 @@ bool checkWin() {
     if (board[0][0][0] != 0 &&
         board[0][0][0] == board[1][1][1] &&
         board[1][1][1] == board[2][2][2]) {
+        winningPositions.push_back(std::make_tuple(0, 0, 0));
+        winningPositions.push_back(std::make_tuple(1, 1, 1));
+        winningPositions.push_back(std::make_tuple(2, 2, 2));
         return true;
     }
     if (board[2][0][0] != 0 &&
         board[2][0][0] == board[1][1][1] &&
         board[1][1][1] == board[0][2][2]) {
+        winningPositions.push_back(std::make_tuple(2, 0, 0));
+        winningPositions.push_back(std::make_tuple(1, 1, 1));
+        winningPositions.push_back(std::make_tuple(0, 2, 2));
         return true;
     }
     if (board[0][2][0] != 0 &&
         board[0][2][0] == board[1][1][1] &&
         board[1][1][1] == board[2][0][2]) {
+        winningPositions.push_back(std::make_tuple(0, 2, 0));
+        winningPositions.push_back(std::make_tuple(1, 1, 1));
+        winningPositions.push_back(std::make_tuple(2, 0, 2));
         return true;
     }
     if (board[2][2][0] != 0 &&
         board[2][2][0] == board[1][1][1] &&
         board[1][1][1] == board[0][0][2]) {
+        winningPositions.push_back(std::make_tuple(2, 2, 0));
+        winningPositions.push_back(std::make_tuple(1, 1, 1));
+        winningPositions.push_back(std::make_tuple(0, 0, 2));
         return true;
     }
 
     return false;
+}
+
+bool checkDraw() {
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            for (int k = 0; k < BOARD_SIZE; k++) {
+                if (board[i][j][k] == 0) {
+                    return false;  // Todavía hay espacios vacíos
+                }
+            }
+        }
+    }
+    return true;  // No hay espacios vacíos
 }
 
 void highlightWinningLine() {
@@ -478,5 +629,69 @@ void drawText(const char* text, float x, float y) {
     glRasterPos2f(x, y);
     for (const char* c = text; *c != '\0'; c++) {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *c);
+    }
+}
+
+void playSound(const char* soundFile) {
+    if (soundEnabled) {
+        std::string fullPath = "sounds/" + std::string(soundFile);
+        std::wstring widePath(fullPath.begin(), fullPath.end());
+        PlaySound(widePath.c_str(), NULL, SND_FILENAME | SND_ASYNC);
+    }
+}
+
+void updateAnimation(int value) {
+    if (isAnimating) {
+        winningAnimationTime += 0.1f;
+        if (winningAnimationTime > 2.0f) {
+            isAnimating = false;
+        }
+        glutPostRedisplay();
+    }
+    glutTimerFunc(16, updateAnimation, 0);
+}
+
+void drawWinningAnimation() {
+    if (!isAnimating) return;
+
+    float scale = 1.0f + 0.2f * sin(winningAnimationTime * 5.0f);
+    float rotation = winningAnimationTime * 180.0f;
+    float pulse = 0.5f + 0.5f * sin(winningAnimationTime * 10.0f);
+
+    // Dibujar línea conectora
+    if (!winningPositions.empty()) {
+        glDisable(GL_LIGHTING);
+        glColor3f(1.0f, 1.0f, 0.0f);
+        glLineWidth(5.0f);
+        glBegin(GL_LINE_STRIP);
+        for (const auto& pos : winningPositions) {
+            int x, y, z;
+            std::tie(x, y, z) = pos;
+            glVertex3f(x * SPACING - SPACING, y * SPACING - SPACING, z * SPACING - SPACING);
+        }
+        glEnd();
+        glEnable(GL_LIGHTING);
+    }
+
+    // Animar las piezas ganadoras
+    for (const auto& pos : winningPositions) {
+        int x, y, z;
+        std::tie(x, y, z) = pos;
+        
+        glPushMatrix();
+        glTranslatef(x * SPACING - SPACING, y * SPACING - SPACING, z * SPACING - SPACING);
+        glRotatef(rotation, 0.0f, 1.0f, 0.0f);
+        glScalef(scale, scale, scale);
+        
+        // Efecto de brillo
+        glColor3f(pulse, pulse, pulse);
+        
+        if (board[x][y][z] == 1) {
+            drawSphere(0, 0, 0, 1);
+        } else {
+            drawSphere(0, 0, 0, 2);
+        }
+        
+        glPopMatrix();
     }
 }
