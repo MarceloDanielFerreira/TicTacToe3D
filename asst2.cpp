@@ -6,6 +6,9 @@
 
 #include <cmath>
 #include <windows.h>
+#ifndef M_PI  
+constexpr double M_PI = 3.14159265358979323846;  
+#endif
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 
@@ -14,29 +17,30 @@
 #endif
 
 // Configuración del juego
-const int BOARD_SIZE = 3;
-const float SPACING = 2.0f;
+constexpr int BOARD_SIZE = 3;
+constexpr float SPACING = 2.0f;
 
 // Variables de estado del juego
-int board[BOARD_SIZE][BOARD_SIZE][BOARD_SIZE] = { 0 }; // 0=vacío, 1=jugador1, 2=jugador2
-int currentPlayer = 1;
-bool gameOver = false;
-int winner = 0;
-bool isDraw = false;  // Nueva variable para detectar empates
+int tablero[BOARD_SIZE][BOARD_SIZE][BOARD_SIZE] = { 0 }; // 0=vacío, 1=jugador1, 2=jugador2
+int jugadorActual = 1;
+bool juegoTerminado = false;
+int ganador = 0;
+bool esEmpate = false;
+bool texturasHabilitadas = true;
 
 // Variables de cámara
-float cameraAngleX = 45.0f;
-float cameraAngleY = 45.0f;
-float cameraDistance = 15.0f;
+float anguloCamaraX = 45.0f;
+float anguloCamaraY = 45.0f;
+float distanciaCamara = 15.0f;
 
 // Variables de audio
-bool soundEnabled = true;
-bool musicEnabled = true;
+bool musicaHabilitada = true;
+bool musicaReproduciendo = false;
 
 // Variables de animación
-float winningAnimationTime = 0.0f;
-bool isAnimating = false;
-std::vector<std::tuple<int, int, int>> winningPositions;
+float tiempoAnimacionGanadora = 0.0f;
+bool estaAnimando = false;
+std::vector<std::tuple<int, int, int>> posicionesGanadoras;
 
 // Prototipos de funciones
 void init();
@@ -86,72 +90,102 @@ void init() {
     glEnable(GL_LIGHT0);
     glEnable(GL_COLOR_MATERIAL);
     glEnable(GL_TEXTURE_2D);
+    glEnable(GL_NORMALIZE);  // Para mejor iluminación
 
-    // Configuración básica de luz
-    GLfloat lightPos[4] = { 10.0f, 10.0f, 10.0f, 1.0f };
+    // Configuración mejorada de luz
+    const GLfloat lightPos[4] = { 10.0f, 10.0f, 10.0f, 1.0f };
+    const GLfloat lightAmbient[4] = { 0.2f, 0.2f, 0.2f, 1.0f };  // Luz ambiental
+    const GLfloat lightDiffuse[4] = { 0.8f, 0.8f, 0.8f, 1.0f };  // Luz difusa
+    const GLfloat lightSpecular[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // Luz especular
+
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmbient);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, lightSpecular);
+
+    // Configuración de materiales
+    const GLfloat matSpecular[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    constexpr GLfloat matShininess = 50.0f;
+    glMaterialfv(GL_FRONT, GL_SPECULAR, matSpecular);
+    glMaterialf(GL_FRONT, GL_SHININESS, matShininess);
 
     glClearColor(0.2f, 0.3f, 0.4f, 1.0f);
 
     // Iniciar música de fondo
-    if (musicEnabled) {
-        PlaySound(TEXT("background.wav"), NULL, SND_FILENAME | SND_ASYNC | SND_LOOP);
+    if (musicaHabilitada) {
+        std::cout << "Intentando iniciar música de fondo..." << std::endl;
+        playSound("background.wav");
     }
 }
 
 void createSimpleTextures() {
-    // Crear texturas simples proceduralmente
+    // Crear texturas mejoradas proceduralmente
 
-    // Textura para los cubos (patrón de madera simulado)
-    unsigned char cubeTexData[64 * 64 * 3];
-    for (int i = 0; i < 64 * 64; i++) {
-        int x = i % 64;
-        int y = i / 64;
-        float value = (sin(x * 0.3f) * cos(y * 0.1f) + 1.0f) * 0.4f + 0.2f;
-        cubeTexData[i * 3 + 0] = static_cast<unsigned char>(value * 180); // R
-        cubeTexData[i * 3 + 1] = static_cast<unsigned char>(value * 120); // G
-        cubeTexData[i * 3 + 2] = static_cast<unsigned char>(value * 60);  // B
+    // Textura para los cubos (patrón de madera mejorado)
+    unsigned char cubeTexData[128 * 128 * 3];
+    for (int i = 0; i < 128 * 128; i++) {
+        int x = i % 128;
+        int y = i / 128;
+        const float value = (sin(x * 0.2f) * cos(y * 0.1f) + 1.0f) * 0.4f + 0.2f;
+        // Añadir variación de color para simular vetas de madera
+        float woodGrain = sin(x * 0.1f + y * 0.05f) * 0.1f;
+        cubeTexData[i * 3 + 0] = static_cast<unsigned char>((value + woodGrain) * 180); // R
+        cubeTexData[i * 3 + 1] = static_cast<unsigned char>((value - woodGrain) * 120); // G
+        cubeTexData[i * 3 + 2] = static_cast<unsigned char>((value + woodGrain) * 60);  // B
     }
 
     glGenTextures(1, &cubeTexture);
     glBindTexture(GL_TEXTURE_2D, cubeTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 64, 64, 0, GL_RGB, GL_UNSIGNED_BYTE, cubeTexData);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 128, 128, 0, GL_RGB, GL_UNSIGNED_BYTE, cubeTexData);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGB, 128, 128, GL_RGB, GL_UNSIGNED_BYTE, cubeTexData);
 
-    // Textura para jugador 1 (rojo con patrón)
-    unsigned char player1TexData[64 * 64 * 3];
-    for (int i = 0; i < 64 * 64; i++) {
-        int x = i % 64;
-        int y = i / 64;
-        float value = (sin(x * 0.2f) * sin(y * 0.2f) + 1.0f) * 0.5f;
-        player1TexData[i * 3 + 0] = static_cast<unsigned char>(value * 255); // R
-        player1TexData[i * 3 + 1] = static_cast<unsigned char>(value * 50);  // G
-        player1TexData[i * 3 + 2] = static_cast<unsigned char>(value * 50);  // B
+    // Textura para jugador 1 (rojo con patrón mejorado)
+    unsigned char player1TexData[128 * 128 * 3];
+    for (int i = 0; i < 128 * 128; i++) {
+        int x = i % 128;
+        int y = i / 128;
+        float value = (sin(x * 0.15f) * sin(y * 0.15f) + 1.0f) * 0.5f;
+        // Añadir variación de color para más profundidad
+        float depth = sin(x * 0.1f + y * 0.1f) * 0.2f;
+        player1TexData[i * 3 + 0] = static_cast<unsigned char>((value + depth) * 255); // R
+        player1TexData[i * 3 + 1] = static_cast<unsigned char>((value - depth) * 50);  // G
+        player1TexData[i * 3 + 2] = static_cast<unsigned char>((value - depth) * 50);  // B
     }
 
     glGenTextures(1, &sphereTexturePlayer1);
     glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 64, 64, 0, GL_RGB, GL_UNSIGNED_BYTE, player1TexData);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 128, 128, 0, GL_RGB, GL_UNSIGNED_BYTE, player1TexData);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGB, 128, 128, GL_RGB, GL_UNSIGNED_BYTE, player1TexData);
 
-    // Textura para jugador 2 (azul con patrón)
-    unsigned char player2TexData[64 * 64 * 3];
-    for (int i = 0; i < 64 * 64; i++) {
-        int x = i % 64;
-        int y = i / 64;
+    // Textura para jugador 2 (azul con patrón mejorado)
+    unsigned char player2TexData[128 * 128 * 3];
+    for (int i = 0; i < 128 * 128; i++) {
+        int x = i % 128;
+        int y = i / 128;
         float value = (cos(x * 0.15f) * sin(y * 0.15f) + 1.0f) * 0.5f;
-        player2TexData[i * 3 + 0] = static_cast<unsigned char>(value * 50);  // R
-        player2TexData[i * 3 + 1] = static_cast<unsigned char>(value * 50);  // G
-        player2TexData[i * 3 + 2] = static_cast<unsigned char>(value * 255); // B
+        // Añadir variación de color para más profundidad
+        float depth = sin(x * 0.1f + y * 0.1f) * 0.2f;
+        player2TexData[i * 3 + 0] = static_cast<unsigned char>((value - depth) * 50);  // R
+        player2TexData[i * 3 + 1] = static_cast<unsigned char>((value - depth) * 50);  // G
+        player2TexData[i * 3 + 2] = static_cast<unsigned char>((value + depth) * 255); // B
     }
 
     glGenTextures(1, &sphereTexturePlayer2);
     glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer2);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 64, 64, 0, GL_RGB, GL_UNSIGNED_BYTE, player2TexData);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 128, 128, 0, GL_RGB, GL_UNSIGNED_BYTE, player2TexData);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGB, 128, 128, GL_RGB, GL_UNSIGNED_BYTE, player2TexData);
 }
 
 void display() {
@@ -162,9 +196,9 @@ void display() {
 
     // Posicionar la cámara
     gluLookAt(
-        cameraDistance * sin(cameraAngleY * M_PI / 180) * cos(cameraAngleX * M_PI / 180),
-        cameraDistance * sin(cameraAngleX * M_PI / 180),
-        cameraDistance * cos(cameraAngleY * M_PI / 180) * cos(cameraAngleX * M_PI / 180),
+        distanciaCamara * sin(anguloCamaraY * M_PI / 180) * cos(anguloCamaraX * M_PI / 180),
+        distanciaCamara * sin(anguloCamaraX * M_PI / 180),
+        distanciaCamara * cos(anguloCamaraY * M_PI / 180) * cos(anguloCamaraX * M_PI / 180),
         0.0, 0.0, 0.0,  // Punto al que mira la cámara (centro de la escena)
         0.0, 1.0, 0.0   // Vector up (orientación vertical)
     );
@@ -183,16 +217,16 @@ void display() {
     glDisable(GL_LIGHTING);
     glColor3f(1.0f, 1.0f, 1.0f);
     char playerText[50];
-    if (gameOver) {
-        if (isDraw) {
+    if (juegoTerminado) {
+        if (esEmpate) {
             sprintf(playerText, "Empate!");
         }
         else {
-            sprintf(playerText, "Jugador %d gana!", winner);
+            sprintf(playerText, "Jugador %d gana!", ganador);
         }
     }
     else {
-        sprintf(playerText, "Turno: Jugador %d", currentPlayer);
+        sprintf(playerText, "Turno: Jugador %d", jugadorActual);
     }
     drawText(playerText, 10, 580);
 
@@ -201,9 +235,11 @@ void display() {
     drawText("Controles:", 10, 550);
     drawText("Click: Seleccionar", 10, 530);
     drawText("Flechas: Rotar camara", 10, 510);
-    drawText("PgUp/PgDn: Zoom", 10, 490);
-    drawText("R: Reiniciar", 10, 470);
-    drawText("Q: Salir", 10, 450);
+    drawText("+/-: Zoom", 10, 490);
+    drawText("Espacio: Texturas On/Off", 10, 470);
+    drawText("R: Reiniciar", 10, 450);
+    drawText("M: Musica On/Off", 10, 430);
+    drawText("Q: Salir", 10, 410);
 
     glEnable(GL_LIGHTING);
     glMatrixMode(GL_PROJECTION);
@@ -224,7 +260,7 @@ void reshape(int w, int h) {
 }
 
 void mouse(int button, int state, int x, int y) {
-    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN && !gameOver) {
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN && !juegoTerminado) {
         // Implementar selección de objetos con picking
         // (código simplificado para el ejemplo)
 
@@ -253,26 +289,22 @@ void mouse(int button, int state, int x, int y) {
         if (selectedX >= 0 && selectedX < BOARD_SIZE &&
             selectedY >= 0 && selectedY < BOARD_SIZE &&
             selectedZ >= 0 && selectedZ < BOARD_SIZE &&
-            board[selectedX][selectedY][selectedZ] == 0) {
+            tablero[selectedX][selectedY][selectedZ] == 0) {
 
-            board[selectedX][selectedY][selectedZ] = currentPlayer;
-            playSound("click.wav");
-
+            tablero[selectedX][selectedY][selectedZ] = jugadorActual;
+            
             if (checkWin()) {
-                gameOver = true;
-                winner = currentPlayer;
-                isAnimating = true;
-                winningAnimationTime = 0.0f;
-                playSound("win.wav");
+                juegoTerminado = true;
+                ganador = jugadorActual;
+                estaAnimando = true;
+                tiempoAnimacionGanadora = 0.0f;
             }
             else if (checkDraw()) {
-                gameOver = true;
-                isDraw = true;
-                playSound("draw.wav");
+                juegoTerminado = true;
+                esEmpate = true;
             }
             else {
-                currentPlayer = (currentPlayer == 1) ? 2 : 1;
-                playSound("turn.wav");
+                jugadorActual = (jugadorActual == 1) ? 2 : 1;
             }
         }
 
@@ -281,9 +313,15 @@ void mouse(int button, int state, int x, int y) {
 }
 
 void keyboard(unsigned char key, int x, int y) {
+    const float ZOOM_SPEED = 0.5f;
+    
     switch (key) {
     case 'q':
     case 'Q':
+        // Detener la música antes de salir
+        if (musicaReproduciendo) {
+            PlaySound(NULL, NULL, 0);
+        }
         exit(0);
         break;
     case 'r':
@@ -292,13 +330,45 @@ void keyboard(unsigned char key, int x, int y) {
         for (int i = 0; i < BOARD_SIZE; i++) {
             for (int j = 0; j < BOARD_SIZE; j++) {
                 for (int k = 0; k < BOARD_SIZE; k++) {
-                    board[i][j][k] = 0;
+                    tablero[i][j][k] = 0;
                 }
             }
         }
-        currentPlayer = 1;
-        gameOver = false;
-        winner = 0;
+        jugadorActual = 1;
+        juegoTerminado = false;
+        ganador = 0;
+        esEmpate = false;
+        glutPostRedisplay();
+        break;
+    case 'm':
+    case 'M':
+        // Toggle música
+        musicaHabilitada = !musicaHabilitada;
+        if (musicaHabilitada) {
+            musicaReproduciendo = false; // Resetear el estado para permitir que la música inicie
+            playSound("background.wav");
+        } else {
+            PlaySound(NULL, NULL, 0);
+            musicaReproduciendo = false;
+        }
+        break;
+    case '+':
+    case '=':  // También funciona con la tecla = (que es la misma que + sin shift)
+        // Acercar
+        distanciaCamara -= ZOOM_SPEED;
+        if (distanciaCamara < 5.0f) distanciaCamara = 5.0f;
+        glutPostRedisplay();
+        break;
+    case '-':
+    case '_':  // También funciona con la tecla - (que es la misma que _ sin shift)
+        // Alejar
+        distanciaCamara += ZOOM_SPEED;
+        if (distanciaCamara > 30.0f) distanciaCamara = 30.0f;
+        glutPostRedisplay();
+        break;
+    case ' ':  // Barra espaciadora
+        // Toggle texturas
+        texturasHabilitadas = !texturasHabilitadas;
         glutPostRedisplay();
         break;
     }
@@ -306,34 +376,25 @@ void keyboard(unsigned char key, int x, int y) {
 
 void specialKeyboard(int key, int x, int y) {
     const float ROTATION_SPEED = 5.0f;
-    const float ZOOM_SPEED = 0.5f;
     
     switch (key) {
         case GLUT_KEY_LEFT:
-            cameraAngleY -= ROTATION_SPEED;
+            anguloCamaraY -= ROTATION_SPEED;
             break;
         case GLUT_KEY_RIGHT:
-            cameraAngleY += ROTATION_SPEED;
+            anguloCamaraY += ROTATION_SPEED;
             break;
         case GLUT_KEY_UP:
-            cameraAngleX += ROTATION_SPEED;
+            anguloCamaraX += ROTATION_SPEED;
             break;
         case GLUT_KEY_DOWN:
-            cameraAngleX -= ROTATION_SPEED;
-            break;
-        case GLUT_KEY_PAGE_UP:
-            cameraDistance -= ZOOM_SPEED;
-            if (cameraDistance < 5.0f) cameraDistance = 5.0f;
-            break;
-        case GLUT_KEY_PAGE_DOWN:
-            cameraDistance += ZOOM_SPEED;
-            if (cameraDistance > 30.0f) cameraDistance = 30.0f;
+            anguloCamaraX -= ROTATION_SPEED;
             break;
     }
     
     // Limitar ángulos de cámara
-    if (cameraAngleX > 89.0f) cameraAngleX = 89.0f;
-    if (cameraAngleX < -89.0f) cameraAngleX = -89.0f;
+    if (anguloCamaraX > 89.0f) anguloCamaraX = 89.0f;
+    if (anguloCamaraX < -89.0f) anguloCamaraX = -89.0f;
     
     glutPostRedisplay();
 }
@@ -350,18 +411,93 @@ void drawBoard() {
                 // Determinar si es un eje principal
                 bool isAxis = (i == 1 && j == 1) || (i == 1 && k == 1) || (j == 1 && k == 1);
                 
-                if (board[i][j][k] == 0) {
+                if (tablero[i][j][k] == 0) {
                     drawCube(x, y, z, isAxis);
                 } else {
-                    drawSphere(x, y, z, board[i][j][k]);
+                    drawSphere(x, y, z, tablero[i][j][k]);
                 }
             }
         }
     }
 
     // Resaltar la línea ganadora si hay un ganador
-    if (gameOver && winner != 0) {
+    if (juegoTerminado && ganador != 0) {
         highlightWinningLine();
+    }
+}
+
+// Función auxiliar para verificar una línea ganadora
+bool verificarLinea(int x1, int y1, int z1, int x2, int y2, int z2, int x3, int y3, int z3) {
+    if (tablero[x1][y1][z1] != 0 &&
+        tablero[x1][y1][z1] == tablero[x2][y2][z2] &&
+        tablero[x2][y2][z2] == tablero[x3][y3][z3]) {
+        
+        // Guardar la línea ganadora
+        posicionesGanadoras.push_back(std::make_tuple(x1, y1, z1));
+        posicionesGanadoras.push_back(std::make_tuple(x2, y2, z2));
+        posicionesGanadoras.push_back(std::make_tuple(x3, y3, z3));
+        return true;
+    }
+    return false;
+}
+
+bool checkWin() {
+    posicionesGanadoras.clear();
+
+    // Verificar líneas horizontales
+    for (int y = 0; y < BOARD_SIZE; y++) {
+        for (int z = 0; z < BOARD_SIZE; z++) {
+            if (verificarLinea(0, y, z, 1, y, z, 2, y, z)) return true;
+        }
+    }
+
+    // Verificar líneas verticales
+    for (int x = 0; x < BOARD_SIZE; x++) {
+        for (int z = 0; z < BOARD_SIZE; z++) {
+            if (verificarLinea(x, 0, z, x, 1, z, x, 2, z)) return true;
+        }
+    }
+
+    // Verificar líneas en profundidad
+    for (int x = 0; x < BOARD_SIZE; x++) {
+        for (int y = 0; y < BOARD_SIZE; y++) {
+            if (verificarLinea(x, y, 0, x, y, 1, x, y, 2)) return true;
+        }
+    }
+
+    // Verificar diagonales en planos XY
+    for (int z = 0; z < BOARD_SIZE; z++) {
+        if (verificarLinea(0, 0, z, 1, 1, z, 2, 2, z)) return true;
+        if (verificarLinea(2, 0, z, 1, 1, z, 0, 2, z)) return true;
+    }
+
+    // Verificar diagonales en planos XZ
+    for (int y = 0; y < BOARD_SIZE; y++) {
+        if (verificarLinea(0, y, 0, 1, y, 1, 2, y, 2)) return true;
+        if (verificarLinea(2, y, 0, 1, y, 1, 0, y, 2)) return true;
+    }
+
+    // Verificar diagonales en planos YZ
+    for (int x = 0; x < BOARD_SIZE; x++) {
+        if (verificarLinea(x, 0, 0, x, 1, 1, x, 2, 2)) return true;
+        if (verificarLinea(x, 2, 0, x, 1, 1, x, 0, 2)) return true;
+    }
+
+    // Verificar diagonales espaciales
+    if (verificarLinea(0, 0, 0, 1, 1, 1, 2, 2, 2)) return true;
+    if (verificarLinea(2, 0, 0, 1, 1, 1, 0, 2, 2)) return true;
+    if (verificarLinea(0, 2, 0, 1, 1, 1, 2, 0, 2)) return true;
+    if (verificarLinea(2, 2, 0, 1, 1, 1, 0, 0, 2)) return true;
+
+    return false;
+}
+
+// Función auxiliar para dibujar una cara del cubo
+void dibujarCaraCubo(float vertices[4][3], float normales[3], float texCoords[4][2]) {
+    glNormal3fv(normales);
+    for (int i = 0; i < 4; i++) {
+        glTexCoord2fv(texCoords[i]);
+        glVertex3fv(vertices[i]);
     }
 }
 
@@ -369,53 +505,50 @@ void drawCube(float x, float y, float z, bool isAxis) {
     glPushMatrix();
     glTranslatef(x, y, z);
     
-    // Aplicar textura
-    glEnable(GL_TEXTURE_2D);
-    if (isAxis) {
+    if (texturasHabilitadas) {
+        glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, cubeTexture);
-        glColor3f(0.8f, 0.6f, 0.2f); // Color amarillo oscuro para ejes
+        glColor3f(isAxis ? 0.8f : 0.7f, isAxis ? 0.6f : 0.7f, isAxis ? 0.2f : 0.7f);
     } else {
-        glBindTexture(GL_TEXTURE_2D, cubeTexture);
-        glColor3f(0.7f, 0.7f, 0.7f); // Color gris para cubos normales
+        glDisable(GL_TEXTURE_2D);
+        glColor3f(isAxis ? 0.8f : 0.7f, isAxis ? 0.6f : 0.7f, isAxis ? 0.2f : 0.7f);
     }
 
-    // Dibujar cubo con coordenadas de textura
+    // Definir vértices para cada cara
+    float vertices[6][4][3] = {
+        // Frente
+        {{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}},
+        // Atrás
+        {{-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}},
+        // Arriba
+        {{-0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}},
+        // Abajo
+        {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}},
+        // Derecha
+        {{0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}},
+        // Izquierda
+        {{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}}
+    };
+
+    // Definir normales para cada cara
+    float normales[6][3] = {
+        {0.0f, 0.0f, 1.0f},  // Frente
+        {0.0f, 0.0f, -1.0f}, // Atrás
+        {0.0f, 1.0f, 0.0f},  // Arriba
+        {0.0f, -1.0f, 0.0f}, // Abajo
+        {1.0f, 0.0f, 0.0f},  // Derecha
+        {-1.0f, 0.0f, 0.0f}  // Izquierda
+    };
+
+    // Definir coordenadas de textura para cada cara
+    float texCoords[4][2] = {
+        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}
+    };
+
     glBegin(GL_QUADS);
-    // Frente
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
-    
-    // Atrás
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    
-    // Arriba
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
-    
-    // Abajo
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
-    
-    // Derecha
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
-    
-    // Izquierda
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    for (int i = 0; i < 6; i++) {
+        dibujarCaraCubo(vertices[i], normales[i], texCoords);
+    }
     glEnd();
     
     glDisable(GL_TEXTURE_2D);
@@ -426,20 +559,30 @@ void drawSphere(float x, float y, float z, int player) {
     glPushMatrix();
     glTranslatef(x, y, z);
     
-    // Aplicar textura
-    glEnable(GL_TEXTURE_2D);
-    if (player == 1) {
-        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer1);
-        glColor3f(1.0f, 0.3f, 0.3f); // Rojo para jugador 1
+    // Aplicar textura solo si están habilitadas
+    if (texturasHabilitadas) {
+        glEnable(GL_TEXTURE_2D);
+        if (player == 1) {
+            glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer1);
+            glColor3f(1.0f, 0.3f, 0.3f); // Rojo para jugador 1
+        } else {
+            glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer2);
+            glColor3f(0.3f, 0.3f, 1.0f); // Azul para jugador 2
+        }
     } else {
-        glBindTexture(GL_TEXTURE_2D, sphereTexturePlayer2);
-        glColor3f(0.3f, 0.3f, 1.0f); // Azul para jugador 2
+        glDisable(GL_TEXTURE_2D);
+        if (player == 1) {
+            glColor3f(1.0f, 0.3f, 0.3f); // Rojo para jugador 1
+        } else {
+            glColor3f(0.3f, 0.3f, 1.0f); // Azul para jugador 2
+        }
     }
 
-    // Crear esfera con coordenadas de textura
+    // Crear esfera con mejor calidad
     GLUquadricObj* quadric = gluNewQuadric();
     gluQuadricTexture(quadric, GL_TRUE);
     gluQuadricNormals(quadric, GLU_SMOOTH);
+    gluQuadricOrientation(quadric, GLU_OUTSIDE);
     gluSphere(quadric, 0.4f, 32, 32);
     gluDeleteQuadric(quadric);
     
@@ -447,164 +590,11 @@ void drawSphere(float x, float y, float z, int player) {
     glPopMatrix();
 }
 
-bool checkWin() {
-    // Verificar todas las posibles líneas ganadoras en 3D
-    winningPositions.clear();  // Limpiar posiciones ganadoras anteriores
-
-    // Verificar líneas en el eje X
-    for (int y = 0; y < BOARD_SIZE; y++) {
-        for (int z = 0; z < BOARD_SIZE; z++) {
-            if (board[0][y][z] != 0 &&
-                board[0][y][z] == board[1][y][z] &&
-                board[1][y][z] == board[2][y][z]) {
-                // Guardar la línea ganadora
-                for (int x = 0; x < BOARD_SIZE; x++) {
-                    winningPositions.push_back(std::make_tuple(x, y, z));
-                }
-                return true;
-            }
-        }
-    }
-
-    // Verificar líneas en el eje Y
-    for (int x = 0; x < BOARD_SIZE; x++) {
-        for (int z = 0; z < BOARD_SIZE; z++) {
-            if (board[x][0][z] != 0 &&
-                board[x][0][z] == board[x][1][z] &&
-                board[x][1][z] == board[x][2][z]) {
-                // Guardar la línea ganadora
-                for (int y = 0; y < BOARD_SIZE; y++) {
-                    winningPositions.push_back(std::make_tuple(x, y, z));
-                }
-                return true;
-            }
-        }
-    }
-
-    // Verificar líneas en el eje Z
-    for (int x = 0; x < BOARD_SIZE; x++) {
-        for (int y = 0; y < BOARD_SIZE; y++) {
-            if (board[x][y][0] != 0 &&
-                board[x][y][0] == board[x][y][1] &&
-                board[x][y][1] == board[x][y][2]) {
-                // Guardar la línea ganadora
-                for (int z = 0; z < BOARD_SIZE; z++) {
-                    winningPositions.push_back(std::make_tuple(x, y, z));
-                }
-                return true;
-            }
-        }
-    }
-
-    // Verificar diagonales en los planos XY
-    for (int z = 0; z < BOARD_SIZE; z++) {
-        if (board[0][0][z] != 0 &&
-            board[0][0][z] == board[1][1][z] &&
-            board[1][1][z] == board[2][2][z]) {
-            // Guardar la línea ganadora
-            for (int x = 0; x < BOARD_SIZE; x++) {
-                winningPositions.push_back(std::make_tuple(x, x, z));
-            }
-            return true;
-        }
-        if (board[2][0][z] != 0 &&
-            board[2][0][z] == board[1][1][z] &&
-            board[1][1][z] == board[0][2][z]) {
-            // Guardar la línea ganadora
-            for (int x = 0; x < BOARD_SIZE; x++) {
-                winningPositions.push_back(std::make_tuple(x, BOARD_SIZE - 1 - x, z));
-                #include <tuple> // Agregar esta línea al inicio del archivo para incluir std::make_tuple
-            }
-            return true;
-        }
-    }
-
-    // Verificar diagonales en los planos XZ
-    for (int y = 0; y < BOARD_SIZE; y++) {
-        if (board[0][y][0] != 0 &&
-            board[0][y][0] == board[1][y][1] &&
-            board[1][y][1] == board[2][y][2]) {
-            // Guardar la línea ganadora
-            for (int x = 0; x < BOARD_SIZE; x++) {
-                winningPositions.push_back(std::make_tuple(x, y, x));
-            }
-            return true;
-        }
-        if (board[2][y][0] != 0 &&
-            board[2][y][0] == board[1][y][1] &&
-            board[1][y][1] == board[0][y][2]) {
-            // Guardar la línea ganadora
-            for (int x = 0; x < BOARD_SIZE; x++) {
-                winningPositions.push_back(std::make_tuple(x, y, BOARD_SIZE - 1 - x));
-            }
-            return true;
-        }
-    }
-
-    // Verificar diagonales en los planos YZ
-    for (int x = 0; x < BOARD_SIZE; x++) {
-        if (board[x][0][0] != 0 &&
-            board[x][0][0] == board[x][1][1] &&
-            board[x][1][1] == board[x][2][2]) {
-            // Guardar la línea ganadora
-            for (int y = 0; y < BOARD_SIZE; y++) {
-                winningPositions.push_back(std::make_tuple(x, y, y));
-            }
-            return true;
-        }
-        if (board[x][2][0] != 0 &&
-            board[x][2][0] == board[x][1][1] &&
-            board[x][1][1] == board[x][0][2]) {
-            // Guardar la línea ganadora
-            for (int y = 0; y < BOARD_SIZE; y++) {
-                winningPositions.push_back(std::make_tuple(x, BOARD_SIZE - 1 - y, y));
-            }
-            return true;
-        }
-    }
-
-    // Verificar diagonales espaciales (de esquina a esquina)
-    if (board[0][0][0] != 0 &&
-        board[0][0][0] == board[1][1][1] &&
-        board[1][1][1] == board[2][2][2]) {
-        winningPositions.push_back(std::make_tuple(0, 0, 0));
-        winningPositions.push_back(std::make_tuple(1, 1, 1));
-        winningPositions.push_back(std::make_tuple(2, 2, 2));
-        return true;
-    }
-    if (board[2][0][0] != 0 &&
-        board[2][0][0] == board[1][1][1] &&
-        board[1][1][1] == board[0][2][2]) {
-        winningPositions.push_back(std::make_tuple(2, 0, 0));
-        winningPositions.push_back(std::make_tuple(1, 1, 1));
-        winningPositions.push_back(std::make_tuple(0, 2, 2));
-        return true;
-    }
-    if (board[0][2][0] != 0 &&
-        board[0][2][0] == board[1][1][1] &&
-        board[1][1][1] == board[2][0][2]) {
-        winningPositions.push_back(std::make_tuple(0, 2, 0));
-        winningPositions.push_back(std::make_tuple(1, 1, 1));
-        winningPositions.push_back(std::make_tuple(2, 0, 2));
-        return true;
-    }
-    if (board[2][2][0] != 0 &&
-        board[2][2][0] == board[1][1][1] &&
-        board[1][1][1] == board[0][0][2]) {
-        winningPositions.push_back(std::make_tuple(2, 2, 0));
-        winningPositions.push_back(std::make_tuple(1, 1, 1));
-        winningPositions.push_back(std::make_tuple(0, 0, 2));
-        return true;
-    }
-
-    return false;
-}
-
 bool checkDraw() {
     for (int i = 0; i < BOARD_SIZE; i++) {
         for (int j = 0; j < BOARD_SIZE; j++) {
             for (int k = 0; k < BOARD_SIZE; k++) {
-                if (board[i][j][k] == 0) {
+                if (tablero[i][j][k] == 0) {
                     return false;  // Todavía hay espacios vacíos
                 }
             }
@@ -633,18 +623,27 @@ void drawText(const char* text, float x, float y) {
 }
 
 void playSound(const char* soundFile) {
-    if (soundEnabled) {
-        std::string fullPath = "sounds/" + std::string(soundFile);
-        std::wstring widePath(fullPath.begin(), fullPath.end());
-        PlaySound(widePath.c_str(), NULL, SND_FILENAME | SND_ASYNC);
+    // Solo manejar la música de fondo
+    if (strcmp(soundFile, "background.wav") == 0) {
+        if (musicaHabilitada && !musicaReproduciendo) {
+            std::string fullPath = "sounds/" + std::string(soundFile);
+            std::wstring widePath(fullPath.begin(), fullPath.end());
+            
+            if (PlaySound(widePath.c_str(), NULL, SND_FILENAME | SND_ASYNC | SND_LOOP)) {
+                musicaReproduciendo = true;
+                std::cout << "Música de fondo iniciada" << std::endl;
+            } else {
+                std::cout << "Error al reproducir música de fondo" << std::endl;
+            }
+        }
     }
 }
 
 void updateAnimation(int value) {
-    if (isAnimating) {
-        winningAnimationTime += 0.1f;
-        if (winningAnimationTime > 2.0f) {
-            isAnimating = false;
+    if (estaAnimando) {
+        tiempoAnimacionGanadora += 0.1f;
+        if (tiempoAnimacionGanadora > 2.0f) {
+            estaAnimando = false;
         }
         glutPostRedisplay();
     }
@@ -652,19 +651,19 @@ void updateAnimation(int value) {
 }
 
 void drawWinningAnimation() {
-    if (!isAnimating) return;
+    if (!estaAnimando) return;
 
-    float scale = 1.0f + 0.2f * sin(winningAnimationTime * 5.0f);
-    float rotation = winningAnimationTime * 180.0f;
-    float pulse = 0.5f + 0.5f * sin(winningAnimationTime * 10.0f);
+    float escala = 1.0f + 0.2f * sin(tiempoAnimacionGanadora * 5.0f);
+    float rotacion = tiempoAnimacionGanadora * 180.0f;
+    float pulso = 0.5f + 0.5f * sin(tiempoAnimacionGanadora * 10.0f);
 
-    // Dibujar línea conectora
-    if (!winningPositions.empty()) {
+    // Dibuja linea conectora entre las piezas ganadoras
+    if (!posicionesGanadoras.empty()) {
         glDisable(GL_LIGHTING);
         glColor3f(1.0f, 1.0f, 0.0f);
         glLineWidth(5.0f);
         glBegin(GL_LINE_STRIP);
-        for (const auto& pos : winningPositions) {
+        for (const auto& pos : posicionesGanadoras) {
             int x, y, z;
             std::tie(x, y, z) = pos;
             glVertex3f(x * SPACING - SPACING, y * SPACING - SPACING, z * SPACING - SPACING);
@@ -673,20 +672,20 @@ void drawWinningAnimation() {
         glEnable(GL_LIGHTING);
     }
 
-    // Animar las piezas ganadoras
-    for (const auto& pos : winningPositions) {
+    // Anima las piezas ganadoras con efectos de rotacion y escala
+    for (const auto& pos : posicionesGanadoras) {
         int x, y, z;
         std::tie(x, y, z) = pos;
         
         glPushMatrix();
         glTranslatef(x * SPACING - SPACING, y * SPACING - SPACING, z * SPACING - SPACING);
-        glRotatef(rotation, 0.0f, 1.0f, 0.0f);
-        glScalef(scale, scale, scale);
+        glRotatef(rotacion, 0.0f, 1.0f, 0.0f);
+        glScalef(escala, escala, escala);
         
-        // Efecto de brillo
-        glColor3f(pulse, pulse, pulse);
+        // Efecto de brillo pulsante
+        glColor3f(pulso, pulso, pulso);
         
-        if (board[x][y][z] == 1) {
+        if (tablero[x][y][z] == 1) {
             drawSphere(0, 0, 0, 1);
         } else {
             drawSphere(0, 0, 0, 2);
