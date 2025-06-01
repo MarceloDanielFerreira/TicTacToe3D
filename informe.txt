@@ -1,0 +1,48 @@
+TA-TE-TI 3D - INFORME 
+============================
+Autores:
+ - Arce Zacarías César Andrés
+ - Ferreira Fernández Marcelo Daniel
+
+DESCRIPCIÓN GENERAL
+------------------
+Ta-Te-Ti 3D es una versión tridimensional del clásico juego Ta-Te-Ti (Tic-Tac-Toe), implementado utilizando OpenGL y Freeglut. El juego permite a dos jugadores competir en un tablero 3x3x3, donde el objetivo es alinear tres piezas en cualquier dirección del espacio tridimensional.
+
+REQUISITOS PRINCIPALES
+--------------------------
+Se cumplieron los 7 requisitos PRINCIPALES
+
+EXTRAS
+- - - - - - - - - - 
+Animación de victoria
+Texto en pantalla
+Música de fondo
+ON/OFF Música
+ON/OFF Texturas
+
+NO RESUELTOS
+-- - - -  - - - - -
+No pudimos ejecutar un sonido de click o cambio de turno sin que se detuviera la canción de fondo, por eso decidimos mantenerla cumpliendo el extra de musica de fondo
+
+
+
+
+CONTROLES DEL JUEGO
+------------------
+- Click Izquierdo: Seleccionar casilla
+- Flechas: Rotar cámara
+- +/-: Zoom in/out
+- Espacio: Toggle texturas
+- R: Reiniciar juego
+- M: Toggle música
+- Q: Salir
+
+DEMO DEL JUEGO
+------------- 
+https://drive.google.com/file/d/1OxwZOzbN5dFloZBaSa7vf0JC6C8Uu2OL/view?usp=sharing
+
+COMO EJECUTAR
+----------------------------
+-Abrir la solución desde Visual Studio (2022)
+-Ejecutar desde el IDE
+
